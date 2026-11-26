@@ -73,8 +73,7 @@ sm_col:      .res 1
 sm_n1:       .res 1
 sm_valid:    .res NUM_SLOTS
 sm_world:    .res NUM_SLOTS
-sm_lives:    .res NUM_SLOTS  ; lives of player 1 (the only player in a 1P game)
-sm_lives2:   .res NUM_SLOTS  ; lives of player 2, $FF = one player game
+sm_pct:      .res NUM_SLOTS  ; completion of the world, in percent (0..100), from the slot header
 sm_job:      .res 1          ; 1 = checksum, 2..9 = write page, 10..17 = verify page, 20..27 = LOAD check page, 28..35 = LOAD apply page
 sm_chk:      .res 1          ; checksum of the image being saved
 sm_mode:     .res 1          ; 1 = the running job is a LOAD
@@ -82,6 +81,7 @@ sm_try:      .res 1          ; header read attempts left
 sm_retry:    .res 1          ; bit n = header of slot n must be read again
 sm_sp:       .res 1          ; stack pointer when the menu was entered
 sm_scr:      .res 2          ; scroll position (Horz_Scroll, Horz_Scroll_Hi) at save time
+sm_savepct:  .res 1          ; completion percentage of the game being saved (travels in the image, offset 7)
 sm_hdr:      .res 9
 sm_line:     .res 14
 
@@ -145,6 +145,7 @@ sm_line:     .res 14
 	sta sm_scr
 	lda Horz_Scroll_Hi
 	sta sm_scr+1
+	jsr Calc_Pct
 	jsr gen_reset
 	stz sm_chk
 	ldx #255			; (gen_next uses Y, so X counts) 255 + 256 = 511 bytes
@@ -443,8 +444,79 @@ sm_line:     .res 14
 .endproc
 
 ;---------------------------------------------------------------------------
+; Completion percentage of the current world -> sm_savepct.
+; The game keeps one bit per finished level / fortress / toad house / lock /
+; rock / bridge of the current world for each player (Map_Completions, 64
+; bytes for Mario and 64 for Luigi).  A cell finished by either player counts (co-op games).
+; PctTotal holds, per world, how many such bits exist (levels, forts, houses,
+; spade panels, hand traps, rocks, locks and bridges; counted from the map data).
+;---------------------------------------------------------------------------
+.proc Calc_Pct
+	stz cnt				; number of bits set by Mario and/or Luigi (co-op: both count)
+	ldy #0
+@by:	lda Map_Completions,y
+	ora Map_Completions+64,y
+	ldx #8
+@bit:	lsr a
+	bcc :+
+	inc cnt
+:	dex
+	bne @bit
+	iny
+	cpy #64
+	bne @by
+	lda cnt
+	sta expect
+	lda #0
+	sta sm_savepct
+	ldx World_Num
+	cpx #9
+	bcs @out
+	lda PctTotal,x
+	beq @out
+	sta skip			; skip = total (ZP alias used as a temp here)
+	lda expect
+	cmp skip
+	bcc :+
+	lda skip			; never more than 100 %
+:	sta expect
+	lda skip			; num = count * 100 + total / 2  (rounds to nearest)
+	lsr a
+	sta gen_total
+	stz gen_hi
+	ldx expect
+	beq @div
+@mul:	lda gen_total
+	clc
+	adc #100
+	sta gen_total
+	bcc :+
+	inc gen_hi
+:	dex
+	bne @mul
+@div:	stz poll			; poll = quotient
+@dl:	lda gen_total
+	sec
+	sbc skip
+	tax
+	lda gen_hi
+	sbc #0
+	bcc @fin
+	sta gen_hi
+	stx gen_total
+	inc poll
+	bra @dl
+@fin:	lda poll
+	sta sm_savepct
+@out:	rts
+.endproc
+
+PctTotal:
+	.byte 11, 16, 26, 18, 19, 23, 19, 10, 0	; worlds 1..9
+
+;---------------------------------------------------------------------------
 ; Read the header (9 bytes, takes about 1 ms) of slot X into
-; sm_valid / sm_world / sm_lives.  The checksum of the whole slot is NOT
+; sm_valid / sm_world / sm_pct.  The checksum of the whole slot is NOT
 ; checked here, because reading all 256 bytes keeps the interrupts off for
 ; about 28 ms, which garbles the screen.  (It is checked when loading.)
 ;---------------------------------------------------------------------------
@@ -502,7 +574,7 @@ sm_line:     .res 14
 	cmp #$33
 	bne @inval
 	lda sm_hdr+2
-	cmp #4				; image format version
+	cmp #5				; image format version
 	bne @inval
 	lda sm_hdr+3
 	bne @inval
@@ -512,21 +584,8 @@ sm_line:     .res 14
 	lda sm_hdr+5			; World_Num (0 based)
 	inc a
 	sta sm_world,x
-	ldy sm_hdr+4			; Player_Current
-	cpy #2
-	bcc :+
-	ldy #0
-:	lda sm_hdr+7,y			; Player_Lives[player]
-	sta sm_lives,x
-	lda #$FF
-	sta sm_lives2,x
-	lda sm_hdr+6			; Total_Players
-	cmp #2
-	bne @done
-	lda sm_hdr+7			; two players: show both
-	sta sm_lives,x
-	lda sm_hdr+8
-	sta sm_lives2,x
+	lda sm_hdr+7			; completion percentage
+	sta sm_pct,x
 @done:	clc
 	rts
 @inval:
@@ -722,7 +781,9 @@ SaveRanges:
 	.byte 1
 	.word Total_Players		; 6
 	.byte 1
-	.word Player_Lives		; 7-8
+	.word sm_savepct		; 7: completion percentage (shown in the menu)
+	.byte 1
+	.word Player_Lives		; 8-9
 	.byte 2
 	.word Map_Completions		; completed levels + inventories, scores, coins
 	.byte <(Inventory_Coins2 + 1 - Map_Completions)
@@ -765,7 +826,7 @@ SaveRanges:
 	.byte 0,0,0			; terminator
 
 SaveMagic:
-	.byte $53, $33, 4, 0
+	.byte $53, $33, 5, 0
 
 ;---------------------------------------------------------------------------
 ; EEPROM helpers
@@ -927,6 +988,7 @@ SaveMagic:
 
 TILE_BLANK = $FE
 TILE_X     = $FB
+TILE_PCT   = $4E			; '%': CHR/chr021.pcx tile $4E, a tile of the map graphics that nothing uses
 TILE_0     = $F0
 
 TxtWorld:  .byte $D8, $F0, $E9, $EC, $EE			; W O R L D
@@ -1084,7 +1146,7 @@ TxtAction:
 	bne @done
 	lda sm_valid,x
 	beq @empty
-	ldx #0				; " 1 WORLD 4 x04"  or  " 1 WORLD 4 2P"
+	ldx #0				; " 1 WORLD 4  20"
 @w:	lda TxtWorld,x
 	sta sm_line,y
 	iny
@@ -1099,18 +1161,26 @@ TxtAction:
 	sta sm_line,y
 	iny
 	iny
-	lda sm_lives2,x
-	cmp #$FF
-	bne @two			; two player game: "2P", no lives
-	lda #TILE_X
+	lda sm_pct,x			; " 1 WORLD 4 20%": 3 tiles, 100 is written without the % sign
+	cmp #100
+	bcc @lt100
+	lda #(TILE_0 + 1)
 	sta sm_line,y
 	iny
-	lda sm_lives,x
-	jmp Ui_PutLives
-@two:	lda #(TILE_0 + 2)
+	lda #TILE_0
 	sta sm_line,y
 	iny
-	lda #$D9			; P
+	sta sm_line,y
+	rts
+@lt100:	jsr Ui_PutLives			; "20%" / " 5%"
+	lda sm_line,y
+	cmp #TILE_0
+	bne @pc				; "20": keep the leading digit
+	lda #TILE_BLANK			; "05": blank instead of the leading 0
+	sta sm_line,y
+@pc:	iny
+	iny
+	lda #TILE_PCT
 	sta sm_line,y
 @done:	rts
 @empty:
