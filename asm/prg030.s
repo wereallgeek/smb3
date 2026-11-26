@@ -3822,6 +3822,9 @@ SetPages_ByTileset:	; $94BB
 ; to the screen, e.g. A = 2 for the status bar.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 Video_Do_Update:	; $94CD
+.ifdef X16
+.export Video_Do_Update		; SMB3+: used by the save menu (save.s)
+.endif
 	PHA		 ; Push A
 
 	ASL A		 ; A << 1 (multiply by 2, looks up different address)
@@ -6346,6 +6349,31 @@ PRG030_9FAF:
 .endif
 
 	JMP IntIRQ_32PixelPartition_Part3
+
+.ifdef X16
+; SMB3+: entered from the save menu (save.s) after a slot was loaded.
+; Fades the map out, then rebuilds it exactly like when a player's turn starts.
+.export Save_LoadEntry
+Save_LoadEntry:
+	LDA #26
+	STA PAGE_A000
+	JSR PRGROM_Change_A000
+	JSR Palette_FadeOut		; Fade out
+	JSR GraphicsBuf_Prep_And_WaitVSync
+
+	; Disable the display
+	LDA #$00
+	STA PPU_CTL2_Copy
+	sta_PPU_CTL2
+
+	; Stop Update_Select activity temporarily
+	INC UpdSel_Disable
+
+	LDA #$00
+	STA Map_Operation		; Map_Operation = 0 ("World X" intro)
+	STA Map_PlayerLost2PVs
+	JMP PRG030_84D7
+.endif
 
 ; NOTE: The remaining ROM space was all blank ($FF)
 

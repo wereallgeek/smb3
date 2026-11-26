@@ -20,6 +20,9 @@
 
 ; XXX
 .import Inventory_Items
+.ifdef X16
+.import Save_Poll
+.endif
 
 ; ZP imports
 .importzp Temp_Var1, Temp_Var2, Temp_Var3, Temp_Var4, Temp_Var5, Temp_Var6, Temp_Var7, Temp_Var11
@@ -82,7 +85,7 @@
 .export DMC03, DMC03_End, DMC07, DMC07_End, DMC08, DMC08_End, FX_MonoFlash_By_MapTick, GameOver_Loop, GameOver_PatchPlayerName
 .export MapTile_Get_By_Offset, Map_ConfigWorldIntro, Map_DoMap, Map_DrawAndPan, Map_GetTile, Map_IntroAttrSave
 .export Map_Object_Valid_Tiles, Map_W8DarknessFill, Map_W8DarknessUpdate, Scroll_Map_SpriteBorder, Video_DoGameOver00
-.export Video_DoGameOver80, Video_DoW2WZ, Video_DoWXLuigi00, Video_DoWXLuigi80, Video_DoWXMario00, Video_DoWXMario80
+.export Video_DoGameOver80, Video_DoW2WZ, Map_Intro_Erase1Strip, Video_DoWXLuigi00, Video_DoWXLuigi80, Video_DoWXMario00, Video_DoWXMario80
 .export World5_Sky_AddCloudDeco, WorldMap_UpdateAndDraw
 
 .segment "PRG010"
@@ -820,6 +823,9 @@ World_BGM_Arrival:
 ; lively and interesting...
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 Map_DoMap:
+.ifdef X16
+	JSR Save_Poll			; SMB3+: START = save to cartridge EEPROM
+.endif
 	JSR World5_Sky_AddCloudDeco	; Add world 5's cloud decoration
 
 	LDA Map_Operation
