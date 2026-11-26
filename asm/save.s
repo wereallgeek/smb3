@@ -73,7 +73,8 @@ sm_col:      .res 1
 sm_n1:       .res 1
 sm_valid:    .res NUM_SLOTS
 sm_world:    .res NUM_SLOTS
-sm_lives:    .res NUM_SLOTS
+sm_lives:    .res NUM_SLOTS  ; lives of player 1 (the only player in a 1P game)
+sm_lives2:   .res NUM_SLOTS  ; lives of player 2, $FF = one player game
 sm_job:      .res 1          ; 1 = checksum, 2..9 = write page, 10..17 = verify page, 20..27 = LOAD check page, 28..35 = LOAD apply page
 sm_chk:      .res 1          ; checksum of the image being saved
 sm_mode:     .res 1          ; 1 = the running job is a LOAD
@@ -455,7 +456,15 @@ sm_line:     .res 14
 	jsr slot_calc
 	php
 	sei
-	jsr i2c_start
+	bra @go
+@bad:
+	jsr i2c_stop
+	plp
+	ldx sm_slot
+	stz sm_valid,x
+	sec				; bus error: worth another try
+	rts
+@go:	jsr i2c_start
 	lda #EE_ADDR_W
 	jsr i2c_send
 	bcs @bad
@@ -509,19 +518,16 @@ sm_line:     .res 14
 	ldy #0
 :	lda sm_hdr+7,y			; Player_Lives[player]
 	sta sm_lives,x
+	lda #$FF
+	sta sm_lives2,x
 	lda sm_hdr+6			; Total_Players
 	cmp #2
 	bne @done
-	lda #$FF			; $FF = two player game
+	lda sm_hdr+7			; two players: show both
 	sta sm_lives,x
+	lda sm_hdr+8
+	sta sm_lives2,x
 @done:	clc
-	rts
-@bad:
-	jsr i2c_stop
-	plp
-	ldx sm_slot
-	stz sm_valid,x
-	sec				; bus error: worth another try
 	rts
 @inval:
 	ldx sm_slot
@@ -947,20 +953,15 @@ TxtAction:
 	lda #$3F
 	sta sm_dirty
 	stz sm_mode
-	stz sm_retry
-	lda #6				; background re-reads allowed
+	lda #((1 << NUM_SLOTS) - 1)	; every header still has to be read: the menu opens first
+	sta sm_retry			; (exactly like the game's own box), the reads follow one per frame
+	lda #9
 	sta sm_try
 	ldx #0
-@rd:	phx
-	jsr Slot_ReadInfo		; one short attempt each, like before
-	plx
-	bcc :+
-	lda Bit_Mask,x			; failed: it will be read again while the menu is open
-	ora sm_retry
-	sta sm_retry
-:	inx
+@z:	stz sm_valid,x
+	inx
 	cpx #NUM_SLOTS
-	bne @rd
+	bne @z
 	rts
 .endproc
 
@@ -970,8 +971,15 @@ TxtAction:
 	lda sm_retry
 	beq @n
 	lda sm_try
-	beq @n
-	dec sm_try
+	bne @try
+	lda sm_retry			; gave up: show what we have ("NO GAME")
+	asl a
+	asl a				; slot n = row bit n+2
+	ora sm_dirty
+	sta sm_dirty
+	stz sm_retry
+	rts
+@try:	dec sm_try
 	ldx #0
 :	lda sm_retry
 	and Bit_Mask,x
@@ -1031,6 +1039,28 @@ TxtAction:
 .endproc
 
 ; A = slot
+; A = lives (0..99), Y = position in sm_line: writes two digit tiles (Y unchanged)
+.proc Ui_PutLives
+	ldx #0
+:	cmp #10
+	bcc :+
+	sbc #10
+	inx
+	bra :-
+:	pha
+	txa
+	clc
+	adc #TILE_0
+	sta sm_line,y
+	pla
+	clc
+	adc #TILE_0
+	iny
+	sta sm_line,y
+	dey
+	rts
+.endproc
+
 .proc Ui_BuildSlot
 	sta sm_slot
 	lda sm_conf			; delete pending on this slot: blink
@@ -1049,9 +1079,12 @@ TxtAction:
 	iny
 	iny
 	ldx sm_slot
+	lda sm_retry			; header not read yet: just the number
+	and Bit_Mask,x
+	bne @done
 	lda sm_valid,x
 	beq @empty
-	ldx #0
+	ldx #0				; " 1 WORLD 4 x04"  or  " 1 WORLD 4 2P"
 @w:	lda TxtWorld,x
 	sta sm_line,y
 	iny
@@ -1066,36 +1099,20 @@ TxtAction:
 	sta sm_line,y
 	iny
 	iny
-	lda sm_lives,x
+	lda sm_lives2,x
 	cmp #$FF
-	beq @two
+	bne @two			; two player game: "2P", no lives
 	lda #TILE_X
 	sta sm_line,y
 	iny
 	lda sm_lives,x
-	ldx #0
-@t:	cmp #10
-	bcc @td
-	sbc #10
-	inx
-	bra @t
-@td:	pha
-	txa
-	clc
-	adc #TILE_0
+	jmp Ui_PutLives
+@two:	lda #(TILE_0 + 2)
 	sta sm_line,y
 	iny
-	pla
-	clc
-	adc #TILE_0
+	lda #$D9			; P
 	sta sm_line,y
 @done:	rts
-@two:	lda #(TILE_0 + 2)		; "2P"
-	sta sm_line,y
-	iny
-	lda #$D9
-	sta sm_line,y
-	rts
 @empty:
 	ldx #0
 @e:	lda TxtNoGame,x
@@ -1169,6 +1186,181 @@ TxtAction:
 	bne @c2
 @end:	lda #0
 	sta Graphics_Buffer,x
+	stx Graphics_BufCnt
+	rts
+.endproc
+
+
+; ---------------------------------------------------------------------------
+; The box itself, drawn through the graphics buffer (the interrupt copies it to
+; VRAM during VBlank) instead of the game's direct-to-VRAM GAME OVER table: a
+; raster interrupt in the middle of a direct write sent pieces of the text to
+; the wrong place.  Same tiles and same place as the game's box.
+BX_REPEAT = $40
+BX_VERT   = $80
+bx_row    = Temp_Var3
+bx_col    = Temp_Var4
+bx_len    = Temp_Var5
+bx_tile   = Temp_Var6
+bx_flags  = Temp_Var7
+bx_n1     = Temp_Var8
+
+; one run of bx_len copies of bx_tile on NT row bx_row from column bx_col
+; (wraps from column 31 to 0, like the game's $13 box)
+.proc Box_Put
+	lda bx_col
+	and #31
+	sta bx_col
+	lda bx_flags
+	bne @emit			; vertical runs never wrap
+	lda #32
+	sec
+	sbc bx_col
+	cmp bx_len
+	bcs @emit
+	sta bx_n1
+	lda bx_len
+	sec
+	sbc bx_n1
+	pha
+	lda bx_n1
+	sta bx_len
+	jsr @emit
+	pla
+	sta bx_len
+	stz bx_col
+@emit:	ldx Graphics_BufCnt
+	lda #$29
+	sta Graphics_Buffer,x
+	lda bx_row
+	and #7
+	asl a
+	asl a
+	asl a
+	asl a
+	asl a
+	clc
+	adc bx_col
+	sta Graphics_Buffer+1,x
+	lda bx_len
+	ora #BX_REPEAT
+	ora bx_flags
+	sta Graphics_Buffer+2,x
+	lda bx_tile
+	sta Graphics_Buffer+3,x
+	lda #0
+	sta Graphics_Buffer+4,x
+	inx
+	inx
+	inx
+	inx
+	stx Graphics_BufCnt
+	rts
+.endproc
+
+; A = column offset from the left edge of the box, bx_len/bx_tile/bx_row already set
+.proc Box_At
+	clc
+	adc sm_c0
+	sta bx_col
+	jmp Box_Put
+.endproc
+
+.export SaveUI_Box
+.proc SaveUI_Box
+	stz bx_flags
+	lda #8				; top border
+	sta bx_row
+	lda #1
+	sta bx_len
+	lda #$A0
+	sta bx_tile
+	lda #0
+	jsr Box_At
+	lda #14
+	sta bx_len
+	lda #$A1
+	sta bx_tile
+	lda #1
+	jsr Box_At
+	lda #1
+	sta bx_len
+	lda #$A2
+	sta bx_tile
+	lda #15
+	jsr Box_At
+	lda #9				; left and right borders
+	sta bx_row
+	lda #6
+	sta bx_len
+	lda #BX_VERT
+	sta bx_flags
+	lda #$E6
+	sta bx_tile
+	lda #0
+	jsr Box_At
+	lda #$E7
+	sta bx_tile
+	lda #15
+	jsr Box_At
+	stz bx_flags			; (the interior is filled by the text rows that follow)
+	lda #15
+	sta bx_row
+	lda #1				; bottom border (row 15)
+	sta bx_len
+	lda #$E3
+	sta bx_tile
+	lda #0
+	jsr Box_At
+	lda #14
+	sta bx_len
+	lda #$E4
+	sta bx_tile
+	lda #1
+	jsr Box_At
+	lda #1
+	sta bx_len
+	lda #$E5
+	sta bx_tile
+	lda #15
+	jsr Box_At
+	; attribute bytes under the box (palette 0), as in the game's own table
+	lda sm_c0
+	cmp #24
+	beq @a80
+	lda #$D2
+	ldy #4
+	jsr Box_Attr
+	lda #$DA
+	ldy #4
+	jmp Box_Attr
+@a80:	lda #$D0
+	ldy #2
+	jsr Box_Attr
+	lda #$D6
+	ldy #4
+	jsr Box_Attr
+	lda #$DE
+	ldy #2
+	jmp Box_Attr
+.endproc
+
+; A = low byte of the attribute address ($2Bxx), Y = count: zeroes
+.proc Box_Attr
+	ldx Graphics_BufCnt
+	sta Graphics_Buffer+1,x
+	lda #$2B
+	sta Graphics_Buffer,x
+	tya
+	ora #BX_REPEAT
+	sta Graphics_Buffer+2,x
+	lda #0
+	sta Graphics_Buffer+3,x
+	sta Graphics_Buffer+4,x
+	inx
+	inx
+	inx
+	inx
 	stx Graphics_BufCnt
 	rts
 .endproc
@@ -1456,29 +1648,31 @@ Bit_Mask: .byte $01, $02, $04, $08, $10, $20
 	lda PAGE_A000
 	sta X16::Reg::RAMBank
 
-	; draw the box (the same way the GAME OVER box is drawn) ...
-	ldx #$12
-	lda Horz_Scroll
-	beq :+
-	ldx #$13
-:	txa
-	jsr Video_Do_Update
+	; Open: everything goes through the graphics buffer, which the interrupt copies
+	; to VRAM during VBlank: first the box, then the six text rows (three per frame).
+	lda #10
+	sta X16::Reg::RAMBank
+	jsr SaveUI_Box
+	lda PAGE_A000
+	sta X16::Reg::RAMBank
+	stz Graphics_Queue
+	jsr GraphicsBuf_Prep_And_WaitVSync
 
-	; ... then replace its text before the first frame is shown
 	lda #10
 	sta X16::Reg::RAMBank
 	jsr SaveUI_Rows
 	lda PAGE_A000
 	sta X16::Reg::RAMBank
-	lda #0
-	jsr Video_Do_Update
+	stz Graphics_Queue
+	jsr GraphicsBuf_Prep_And_WaitVSync
+
 	lda #10
 	sta X16::Reg::RAMBank
 	jsr SaveUI_Rows
 	lda PAGE_A000
 	sta X16::Reg::RAMBank
-	lda #0
-	jsr Video_Do_Update
+	stz Graphics_Queue
+	jsr GraphicsBuf_Prep_And_WaitVSync
 
 @frame:
 	stz Graphics_Queue
