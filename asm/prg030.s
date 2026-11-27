@@ -27,6 +27,7 @@
 .importzp Pad_Input, PlantInfest_ACnt, VBlank_TickEn, Map_Enter2PFlag, Map_EnterLevelFX, Level_Width
 .importzp Scroll_ColumnR, Scroll_ColumnL, Scroll_VOffsetT, Scroll_VOffsetB, Scroll_ColorStrip
 .importzp Scroll_LastDir, Scroll_RightUpd, Scroll_VertUpd, Scroll_LeftUpd, Graphics_Queue
+.importzp Vs_State, Vs_IsPaused
 .importzp Level_LayPtr_AddrL, Level_LayPtr_AddrH, Map_Tile_AddrL, Map_Tile_AddrH, Level_ObjPtr_AddrL
 .importzp Level_ObjPtr_AddrH, Video_Upd_AddrL, Video_Upd_AddrH, Scroll_OddEven, Vert_Scroll, Horz_Scroll
 .importzp PPU_CTL1_Copy, Ending2_IntCmd
@@ -1453,6 +1454,14 @@ PRG030_88E9:
 	BEQ PRG030_891A	 	; If not entering 2P Vs mode, jump to PRG030_891A
 
 	; 2P Vs mode begin!
+
+.ifdef X16
+	; Vs_State/Vs_IsPaused share zero page $A9/$AA with World_Map_Y of the map context, so
+	; they held the players' map Y here and Vs_2PVsInit never ran (Vs level frozen).
+	; Both must start at 0.
+	STZ Vs_State
+	STZ Vs_IsPaused
+.endif
 
 	; Level_Tileset = 18 (2P Vs)
 	LDA #18
