@@ -24,7 +24,7 @@
 .import Map_Completions, Inventory_Coins2, Player_Lives, World_Num, Total_Players
 .import Map_Got13Warp, Map_Previous_Y, World_Map_Power, Map_Prev_XOff, Map_Prev_XHi, Map_Prev_XOff2, Map_Prev_XHi2, Map_Previous_Dir
 .import Map_NSpadeMatches, Card_ActiveSet, Map_NSpade_NextScore
-.import Map_Entered_Y, Save_LoadEntry, Map_Objects_Y, Map_Objects_Itm, Map_Airship_Dest, Map_Airship_Trav, BigQBlock_GotIt
+.import Map_Entered_Y, Save_LoadEntry, Map_Objects_IDs, Map_Objects_Y, Map_Objects_Itm, Map_Airship_Dest, Map_Airship_Trav, BigQBlock_GotIt
 .import Graphics_Buffer, Graphics_BufCnt, Sprite_RAM, PAGE_A000
 .import Map_IntroAttrSave, Map_Intro_Erase1Strip
 .import Video_Do_Update, GraphicsBuf_Prep_And_WaitVSync, Sprite_RAM_Clear
@@ -448,6 +448,8 @@ sm_line:     .res 14
 ; The game keeps one bit per finished level / fortress / toad house / lock /
 ; rock / bridge of the current world for each player (Map_Completions, 64
 ; bytes for Mario and 64 for Luigi).  A cell finished by either player counts (co-op games).
+; Hammer/Boomerang/Heavy/Fire Bros and World 7 plants are map objects: each one
+; that disappeared from Map_Objects_IDs counts as one more finished item.
 ; PctTotal holds, per world, how many such bits exist (levels, forts, houses,
 ; spade panels, hand traps, rocks, locks and bridges; counted from the map data).
 ;---------------------------------------------------------------------------
@@ -474,38 +476,47 @@ sm_line:     .res 14
 	bcs @out
 	lda PctTotal,x
 	beq @out
+	clc
+	adc HbTotal,x			; cells + brothers = what 100 % means
 	sta skip			; skip = total (ZP alias used as a temp here)
+	stz cnt				; count the Hammer/Boomerang/Heavy/Fire Bros and plants still on the map
+	ldy #13
+@ob:	lda Map_Objects_IDs,y
+	cmp #3				; MAPOBJ_HAMMERBRO
+	bcc :+
+	cmp #8				; ... up to MAPOBJ_W7PLANT
+	bcs :+
+	inc cnt
+:	dey
+	bpl @ob
+	lda HbTotal,x			; beaten = at the start - still there
+	sec
+	sbc cnt
+	bcc @nohb			; (more than at the start: a coin ship died, none counted)
+	clc
+	adc expect
+	sta expect
+@nohb:
 	lda expect
 	cmp skip
 	bcc :+
 	lda skip			; never more than 100 %
 :	sta expect
-	lda skip			; num = count * 100 + total / 2  (rounds to nearest)
-	lsr a
-	sta gen_total
-	stz gen_hi
-	ldx expect
-	beq @div
-@mul:	lda gen_total
-	clc
-	adc #100
-	sta gen_total
-	bcc :+
-	inc gen_hi
-:	dex
-	bne @mul
-@div:	stz poll			; poll = quotient
+	lda skip			; percent = floor((count * 100 + total / 2) / total), found by
+	lsr a				; adding count 100 times and counting how often total is passed
+	sta gen_total			; gen_total = running remainder, starts at total / 2
+	stz poll			; poll = quotient
+	ldx #100
 @dl:	lda gen_total
-	sec
-	sbc skip
-	tax
-	lda gen_hi
-	sbc #0
-	bcc @fin
-	sta gen_hi
-	stx gen_total
+	clc
+	adc expect
+	cmp skip
+	bcc :+
+	sbc skip			; (carry is set here)
 	inc poll
-	bra @dl
+:	sta gen_total
+	dex
+	bne @dl
 @fin:	lda poll
 	sta sm_savepct
 @out:	rts
@@ -513,6 +524,8 @@ sm_line:     .res 14
 
 PctTotal:
 	.byte 11, 16, 26, 18, 19, 23, 19, 10, 0	; worlds 1..9
+HbTotal:
+	.byte  1,  3,  2,  3,  3,  3,  2,  0, 0	; brothers / plants on the map at the start of each world
 
 ;---------------------------------------------------------------------------
 ; Read the header (9 bytes, takes about 1 ms) of slot X into
