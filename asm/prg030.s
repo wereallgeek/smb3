@@ -5473,6 +5473,21 @@ PRG030_9BA9:
 PRG030_9BB1:
 	RTS		 ; Return
 
+.ifdef X16
+; Scroll_Update called from code living in RAM bank 10 ($A000), i.e. Map_DoMap.
+; The NES routine ends by putting the tile page (11 on the map) back at A000 (SetPages_ByTileset),
+; which on the X16 maps bank 11 over the caller and sends it off into the weeds: the pan counter
+; was skipped, the pan overshot and the border was not redrawn.  Keep the caller's bank.
+.export Scroll_Update_Bank10
+Scroll_Update_Bank10:
+	lda X16::Reg::RAMBank
+	pha
+	jsr Scroll_Update
+	pla
+	sta X16::Reg::RAMBank
+	rts
+.endif
+
 
 PRG030_9BB2:
 	LDA Vert_Scroll

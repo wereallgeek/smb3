@@ -60,6 +60,9 @@
 .import StatusBar_LivesH, StatusBar_LivesL, Map_MusicBox_Cnt
 ; imports from PRG030
 .import TileLayout_GetBaseAddr, TileLayout_ByTileset, Tile_Mem_Addr, Scroll_Update
+.ifdef X16
+.import Scroll_Update_Bank10
+.endif
 .import Scroll_Update_Ranges
 ; imports from PRG031
 .import PRGROM_Change_A000, DynJump
@@ -931,7 +934,11 @@ PRG010_C447:
 	STA Horz_Scroll_Hi	; Add carry if needed!
 
 	JSR Scroll_Update_Ranges	; Update Scroll column values
+.ifdef X16
+	JSR Scroll_Update_Bank10	; Render new column of tiles if needed (and come back with bank 10 mapped)
+.else
 	JSR Scroll_Update	 	; Render new column of tiles if needed
+.endif
 	JSR Scroll_Map_SpriteBorder	; Keep up the map's sprite border
 
 	DEC Map_Pan_Count
