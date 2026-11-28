@@ -31,6 +31,12 @@ Requires:
 * A recent version of python3 with the PIL module to let the conversion script interpret the PCX assets into VERA tile/sprite format
 * cc65 and make
 
+This forks added feature for X16
+* Save game:
+    * Adds a popup on the map for save/delete/load
+    * This system saves data on EEPROM on I2C at $50
+    * Does not popup if no EEPROM present
+
 Issues on the X16 fixed by this fork
 * Visual glitches:
     * Player sprite is not properly occluded when entering or emerging from a pipe
