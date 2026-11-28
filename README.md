@@ -31,12 +31,18 @@ Requires:
 * A recent version of python3 with the PIL module to let the conversion script interpret the PCX assets into VERA tile/sprite format
 * cc65 and make
 
-Known issues with the X16 build:
+Issues on the X16 fixed by this fork
+* Visual glitches:
+    * Player sprite is not properly occluded when entering or emerging from a pipe
+    * World map visuals are corrupted when scrolled.
+* Gameplay issues:
+    * 2 player versus mode is not working (level loads and then soft-locks)
+
+
+Remaining known issues with the X16 build:
 * Visual glitches:
     * The wrong tileset may show for a single frame immediately after a map or level is loaded
-    * Player sprite is not properly occluded when entering or emerging from a pipe
     * Emerging powerups and piranha plants in pipes may show the wrong masking sprite
-    * World map visuals are corrupted when scrolled.
     * When having fewer than 10 coins, the tens digit of the coin count may show the wrong glyph in place of a space on the world map
 * Gameplay issues:
     * Directional lifts and donut blocks may misbehave in vertical levels
