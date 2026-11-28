@@ -608,8 +608,19 @@ PRG029_CF09:
 PRG029_CF0B:
 	STA Temp_Var1	 ; Store cycle tick into Temp_Var1 (0 if not invincible, sprite palette 0)
 
+.ifdef X16
+	; The NES hides the Player in a pipe with an opaque "cover sprite" (see below) placed
+	; in front of him in OAM order but behind the tiles.  VERA sprites are ordered by
+	; z-depth first, so that cover (behind the tiles) could never hide the Player (in front
+	; of the tiles) and he was drawn over the pipe.  Instead put the Player behind the
+	; tiles while he is moving through a pipe: the opaque pipe tiles then occlude him and
+	; the sky (tile colour 0) is transparent, which gives the intended entering/emerging look.
+	LDA Level_PipeMove
+	ORA Player_Behind
+.else
 	LDA Level_PipeMove
 	LDA Player_Behind
+.endif
 	ORA Player_SandSink
 	BEQ PRG029_CF1E	 ; If Player is behind the scenes, jump to PRG029_CF1E
 
