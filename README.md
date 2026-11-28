@@ -52,5 +52,4 @@ Remaining known issues with the X16 build:
     * When having fewer than 10 coins, the tens digit of the coin count may show the wrong glyph in place of a space on the world map
 * Gameplay issues:
     * Directional lifts and donut blocks may misbehave in vertical levels
-    * 2 player versus mode is not working (level loads and then soft-locks)
     * Sorry, the 7-1 wrong warp will not lead to the credits due to the vastly different memory layout. ;)
