@@ -1715,8 +1715,33 @@ Bit_Mask: .byte $01, $02, $04, $08, $10, $20
 ;===========================================================================
 .segment "X16BRIDGE"
 
+; Is the cartridge EEPROM there?  One address-only transfer (no data): carry clear = the 24CL128
+; answered (ACK), carry set = nobody answered.  On a cartridge without EEPROM, or on any other
+; medium (SD card...), nothing pulls SDA low, so there is no ACK.  Takes well under 1 ms.
+; Runs with bank 10 mapped (it calls the bit-banged I2C routines of bank 10).
+.proc Save_Probe
+	php
+	sei
+	jsr i2c_start
+	lda #EE_ADDR_W
+	jsr i2c_send
+	php				; keep the ACK result (carry)
+	jsr i2c_stop
+	pla
+	tax
+	plp				; back to the caller's interrupt state
+	txa
+	lsr a				; carry = 1: no ACK
+	rts
+.endproc
+
 .export Save_Modal
 .proc Save_Modal
+	jsr Save_Probe
+	bcc @present
+	rts				; no EEPROM: ignore START completely (no sound, no popup),
+					; back to Map_DoMap exactly as Save_Poll's other exits
+@present:
 	tsx
 	stx sm_sp
 	lda World_EnterState
